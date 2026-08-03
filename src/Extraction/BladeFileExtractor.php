@@ -34,7 +34,7 @@ final class BladeFileExtractor
      *
      * @var array<string, string>
      */
-    private const PATTERNS = [
+    private const array PATTERNS = [
         '/(?<!->)(?<!::)(?<!\$)\btrans_choice\(/' => 'trans_choice',
         '/(?<!->)(?<!::)(?<!\$)\btrans\(/' => 'trans',
         '/(?<!->)(?<!::)(?<!\$)\b__\(/' => '__',

@@ -31,7 +31,7 @@ final class TranslationCallVisitor extends NodeVisitorAbstract
         private readonly ArgumentResolver $argumentResolver = new ArgumentResolver,
     ) {}
 
-    public function enterNode(Node $node)
+    public function enterNode(Node $node): null
     {
         if ($node instanceof FuncCall) {
             $this->visitFuncCall($node);
