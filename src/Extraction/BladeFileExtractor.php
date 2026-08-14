@@ -95,36 +95,43 @@ final class BladeFileExtractor
 
             $line = substr_count($code, "\n", 0, $matchOffset) + 1;
 
-            $calls[] = new TranslationCall(
-                callee: $callee,
-                argument: $this->classifyArguments($argumentsText),
-                line: $line,
-            );
+            foreach ($this->classifyArguments($argumentsText) as $argument) {
+                $calls[] = new TranslationCall(
+                    callee: $callee,
+                    argument: $argument,
+                    line: $line,
+                );
+            }
         }
 
         return $calls;
     }
 
-    private function classifyArguments(string $argumentsText): LiteralArgument
+    /**
+     * @return array<int, LiteralArgument>
+     */
+    private function classifyArguments(string $argumentsText): array
     {
         try {
             $statements = $this->parser->parse("<?php __harvest_call__({$argumentsText});");
         } catch (PhpParserError) {
-            return LiteralArgument::dynamic();
+            return [LiteralArgument::dynamic()];
         }
 
         $firstStatement = $statements[0] ?? null;
 
         if (! $firstStatement instanceof Expression || ! $firstStatement->expr instanceof FuncCall) {
-            return LiteralArgument::dynamic();
+            return [LiteralArgument::dynamic()];
         }
 
         $args = $firstStatement->expr->args;
 
         if (! isset($args[0]) || ! $args[0] instanceof Node\Arg) {
-            return LiteralArgument::dynamic();
+            return [LiteralArgument::dynamic()];
         }
 
-        return $this->argumentResolver->resolve($args[0]->value);
+        $resolved = $this->argumentResolver->resolveAll($args[0]->value);
+
+        return $resolved === [] ? [LiteralArgument::dynamic()] : $resolved;
     }
 }

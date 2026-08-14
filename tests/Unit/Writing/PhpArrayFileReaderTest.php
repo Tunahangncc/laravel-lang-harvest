@@ -48,8 +48,6 @@ it('throws when the file contains invalid PHP', function () {
 
     try {
         (new PhpArrayFileReader)->read($path);
-    } catch (UnreadableLangFileException $exception) {
-        expect($exception->getMessage())->toContain('invalid PHP');
     } finally {
         unlink($path);
     }

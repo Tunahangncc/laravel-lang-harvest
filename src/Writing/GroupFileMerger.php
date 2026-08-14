@@ -21,7 +21,7 @@ final class GroupFileMerger
         $conflicts = [];
 
         foreach ($entries as $entry) {
-            $outcome = $this->insert($data, $entry->segments, $entry->placeholder);
+            [$data, $outcome] = $this->insert($data, $entry->segments, $entry->placeholder);
 
             match ($outcome) {
                 InsertOutcome::Added => $added[] = $entry,
@@ -36,29 +36,32 @@ final class GroupFileMerger
     /**
      * @param  array<array-key, mixed>  $data
      * @param  array<int, string>  $segments
+     * @return array{0: array<array-key, mixed>, 1: InsertOutcome}
      */
-    private function insert(array &$data, array $segments, string $placeholder): InsertOutcome
+    private function insert(array $data, array $segments, string $placeholder): array
     {
         $segment = array_shift($segments);
 
         if ($segments === []) {
             if (array_key_exists($segment, $data)) {
-                return InsertOutcome::AlreadyExists;
+                return [$data, InsertOutcome::AlreadyExists];
             }
 
             $data[$segment] = $placeholder;
 
-            return InsertOutcome::Added;
+            return [$data, InsertOutcome::Added];
         }
 
-        if (! array_key_exists($segment, $data)) {
-            $data[$segment] = [];
+        $child = $data[$segment] ?? [];
+
+        if (! is_array($child)) {
+            return [$data, InsertOutcome::Conflict];
         }
 
-        if (! is_array($data[$segment])) {
-            return InsertOutcome::Conflict;
-        }
+        [$updatedChild, $outcome] = $this->insert($child, $segments, $placeholder);
 
-        return $this->insert($data[$segment], $segments, $placeholder);
+        $data[$segment] = $updatedChild;
+
+        return [$data, $outcome];
     }
 }

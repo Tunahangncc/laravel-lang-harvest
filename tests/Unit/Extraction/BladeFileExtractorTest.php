@@ -82,3 +82,13 @@ it('finds multiple calls in a mixed template with correct line numbers', functio
         ->and($calls[1]->line)->toBe(3)
         ->and($calls[1]->callee)->toBe('@lang');
 });
+
+it('splits a real-world @lang() ternary into two harvestable calls', function () {
+    $calls = (new BladeFileExtractor)->extract("<div>\n    @lang(isset(\$post) ? 'Edit Post' : 'Create New Post')\n</div>");
+
+    expect($calls)->toHaveCount(2);
+    expect($calls[0]->callee)->toBe('@lang');
+    expect($calls[0]->argument->value)->toBe('Edit Post');
+    expect($calls[1]->callee)->toBe('@lang');
+    expect($calls[1]->argument->value)->toBe('Create New Post');
+});
