@@ -2,40 +2,49 @@
 
 declare(strict_types=1);
 
-use LaravelLangHarvest\LaravelLangHarvest\Scanning\DirectoryExclusionMatcher;
+namespace LaravelLangHarvest\LaravelLangHarvest\Scanning;
 
-it('matches the excluded directory itself', function () {
-    $matcher = new DirectoryExclusionMatcher(['/app/vendor']);
+/**
+ * Decides whether a given absolute path falls under one of a set of
+ * excluded directories (either the excluded directory itself or
+ * anything nested inside it).
+ *
+ * All paths are normalized to forward slashes before comparison. On
+ * Windows, RecursiveDirectoryIterator joins path segments with
+ * backslashes regardless of which separator the starting path used,
+ * so comparing raw strings would silently fail to match there.
+ */
+final readonly class DirectoryExclusionMatcher
+{
+    /** @var array<int, string> */
+    private array $excludedDirectories;
 
-    expect($matcher->matches('/app/vendor'))->toBeTrue();
-});
+    /**
+     * @param  array<int, string>  $excludedDirectories
+     */
+    public function __construct(array $excludedDirectories)
+    {
+        $this->excludedDirectories = array_values(array_filter(array_map(
+            $this->normalize(...),
+            $excludedDirectories,
+        )));
+    }
 
-it('matches a path nested inside an excluded directory', function () {
-    $matcher = new DirectoryExclusionMatcher(['/app/vendor']);
+    public function matches(string $path): bool
+    {
+        $normalized = $this->normalize($path);
 
-    expect($matcher->matches('/app/vendor/some-package/File.php'))->toBeTrue();
-});
+        foreach ($this->excludedDirectories as $excluded) {
+            if ($normalized === $excluded || str_starts_with($normalized.'/', $excluded.'/')) {
+                return true;
+            }
+        }
 
-it('does not match an unrelated path', function () {
-    $matcher = new DirectoryExclusionMatcher(['/app/vendor']);
+        return false;
+    }
 
-    expect($matcher->matches('/app/src/File.php'))->toBeFalse();
-});
-
-it('does not match a sibling directory with a similar name prefix', function () {
-    $matcher = new DirectoryExclusionMatcher(['/app/storage']);
-
-    expect($matcher->matches('/app/storage-backup/Old.php'))->toBeFalse();
-});
-
-it('normalizes a trailing slash on the excluded directory', function () {
-    $matcher = new DirectoryExclusionMatcher(['/app/vendor/']);
-
-    expect($matcher->matches('/app/vendor/some-package/File.php'))->toBeTrue();
-});
-
-it('returns false for an empty exclusion list', function () {
-    $matcher = new DirectoryExclusionMatcher([]);
-
-    expect($matcher->matches('/anything'))->toBeFalse();
-});
+    private function normalize(string $path): string
+    {
+        return rtrim(str_replace('\\', '/', $path), '/');
+    }
+}

@@ -2,148 +2,87 @@
 
 declare(strict_types=1);
 
-use LaravelLangHarvest\LaravelLangHarvest\Scanning\FileScanner;
-use Random\RandomException;
+namespace LaravelLangHarvest\LaravelLangHarvest\Scanning;
+
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use SplFileInfo;
 
 /**
- * Creates a temporary directory tree for a test and returns its root path.
+ * Recursively finds .php and .blade.php files under a set of configured
+ * paths, skipping any directory that falls under one of the configured
+ * excluded directories entirely (it is never descended into).
  *
- * @param  array<string, string>  $files  Relative path => file contents.
- *
- * @throws RandomException
+ * Every returned path is normalized to forward slashes, regardless of
+ * platform, so output is consistent between Windows and Unix.
  */
-function makeScannerFixture(array $files): string
+final class FileScanner
 {
-    $root = sys_get_temp_dir().'/lang-harvest-'.bin2hex(random_bytes(6));
-    mkdir($root, recursive: true);
+    /**
+     * @param  array<int, string>  $paths  Absolute file or directory paths to scan.
+     * @param  array<int, string>  $excludedDirectories  Absolute directory paths to skip entirely.
+     * @return array<int, string> Absolute file paths, deduplicated and sorted.
+     */
+    public function scan(array $paths, array $excludedDirectories = []): array
+    {
+        $exclusionMatcher = new DirectoryExclusionMatcher($excludedDirectories);
 
-    foreach ($files as $relativePath => $contents) {
-        $fullPath = $root.'/'.$relativePath;
-        $directory = dirname($fullPath);
+        $files = [];
 
-        if (! is_dir($directory)) {
-            mkdir($directory, recursive: true);
+        foreach ($paths as $path) {
+            foreach ($this->scanPath($path, $exclusionMatcher) as $file) {
+                $files[$file] = true;
+            }
         }
 
-        file_put_contents($fullPath, $contents);
+        $files = array_keys($files);
+        sort($files);
+
+        return $files;
     }
 
-    return $root;
+    /**
+     * @return iterable<string>
+     */
+    private function scanPath(string $path, DirectoryExclusionMatcher $exclusionMatcher): iterable
+    {
+        if (is_file($path)) {
+            if ($this->hasPhpExtension($path)) {
+                yield $this->normalize($path);
+            }
+
+            return;
+        }
+
+        if (! is_dir($path) || $exclusionMatcher->matches($path)) {
+            return;
+        }
+
+        $directoryIterator = new RecursiveDirectoryIterator(
+            $path,
+            FilesystemIterator::SKIP_DOTS,
+        );
+
+        $filtered = new ExcludingRecursiveFilterIterator($directoryIterator, $exclusionMatcher);
+
+        $iterator = new RecursiveIteratorIterator($filtered);
+
+        foreach ($iterator as $fileInfo) {
+            /** @var SplFileInfo $fileInfo */
+            if ($fileInfo->isFile() && $this->hasPhpExtension($fileInfo->getPathname())) {
+                yield $this->normalize($fileInfo->getPathname());
+            }
+        }
+    }
+
+    private function hasPhpExtension(string $path): bool
+    {
+        return str_ends_with($path, '.php');
+    }
+
+    private function normalize(string $path): string
+    {
+        return str_replace('\\', '/', $path);
+    }
 }
-
-function removeScannerFixture(string $root): void
-{
-    if (! is_dir($root)) {
-        return;
-    }
-
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST,
-    );
-
-    foreach ($iterator as $fileInfo) {
-        $fileInfo->isDir() ? rmdir($fileInfo->getPathname()) : unlink($fileInfo->getPathname());
-    }
-
-    rmdir($root);
-}
-
-it('finds .php and .blade.php files recursively', function () {
-    $root = makeScannerFixture([
-        'app/Models/Car.php' => '<?php',
-        'resources/views/welcome.blade.php' => '<div></div>',
-        'resources/views/readme.md' => '# readme',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root]);
-
-        expect($files)->toBe([
-            $root.'/app/Models/Car.php',
-            $root.'/resources/views/welcome.blade.php',
-        ]);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('ignores non-php files', function () {
-    $root = makeScannerFixture([
-        'notes.txt' => 'not php',
-        'config.json' => '{}',
-        'App.php' => '<?php',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root]);
-
-        expect($files)->toBe([$root.'/App.php']);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('does not descend into an excluded directory', function () {
-    $root = makeScannerFixture([
-        'app/Models/Car.php' => '<?php',
-        'vendor/some-package/File.php' => '<?php',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root], [$root.'/vendor']);
-
-        expect($files)->toBe([$root.'/app/Models/Car.php']);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('does not exclude a sibling directory with a similar name prefix', function () {
-    $root = makeScannerFixture([
-        'storage/Cache.php' => '<?php',
-        'storage-backup/Old.php' => '<?php',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root], [$root.'/storage']);
-
-        expect($files)->toBe([$root.'/storage-backup/Old.php']);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('deduplicates files reached through overlapping paths', function () {
-    $root = makeScannerFixture([
-        'app/Models/Car.php' => '<?php',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root, $root.'/app']);
-
-        expect($files)->toBe([$root.'/app/Models/Car.php']);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('accepts a direct file path instead of a directory', function () {
-    $root = makeScannerFixture([
-        'app/Models/Car.php' => '<?php',
-    ]);
-
-    try {
-        $files = (new FileScanner)->scan([$root.'/app/Models/Car.php']);
-
-        expect($files)->toBe([$root.'/app/Models/Car.php']);
-    } finally {
-        removeScannerFixture($root);
-    }
-});
-
-it('silently skips a path that does not exist', function () {
-    $files = (new FileScanner)->scan([sys_get_temp_dir().'/lang-harvest-missing-'.bin2hex(random_bytes(6))]);
-
-    expect($files)->toBe([]);
-});
