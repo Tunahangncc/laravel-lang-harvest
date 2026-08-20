@@ -15,7 +15,10 @@ use PhpParser\NodeVisitorAbstract;
  * argument along the way.
  *
  * Every matched call site is recorded, even when the first argument is
- * dynamic or missing, so callers can report on it (e.g. --check).
+ * dynamic or missing, so callers can report on it (e.g. --check). A
+ * call whose argument is a ternary with only static branches (e.g.
+ * `$cond ? 'Edit Post' : 'Create Post'`) produces one call entry per
+ * branch, since every possible outcome is harvestable.
  *
  * @internal Used by PhpFileExtractor; not part of the public API.
  */
@@ -31,7 +34,7 @@ final class TranslationCallVisitor extends NodeVisitorAbstract
         private readonly ArgumentResolver $argumentResolver = new ArgumentResolver,
     ) {}
 
-    public function enterNode(Node $node)
+    public function enterNode(Node $node): null
     {
         if ($node instanceof FuncCall) {
             $this->visitFuncCall($node);
@@ -78,21 +81,28 @@ final class TranslationCallVisitor extends NodeVisitorAbstract
 
     private function recordCall(FuncCall|StaticCall $node, string $callee): void
     {
-        $this->calls[] = new TranslationCall(
-            callee: $callee,
-            argument: $this->classifyFirstArgument($node),
-            line: $node->getStartLine(),
-        );
+        foreach ($this->resolveArguments($node) as $argument) {
+            $this->calls[] = new TranslationCall(
+                callee: $callee,
+                argument: $argument,
+                line: $node->getStartLine(),
+            );
+        }
     }
 
-    private function classifyFirstArgument(FuncCall|StaticCall $node): LiteralArgument
+    /**
+     * @return array<int, LiteralArgument>
+     */
+    private function resolveArguments(FuncCall|StaticCall $node): array
     {
         $args = $node->args;
 
         if (! isset($args[0]) || ! $args[0] instanceof Node\Arg) {
-            return LiteralArgument::dynamic();
+            return [LiteralArgument::dynamic()];
         }
 
-        return $this->argumentResolver->resolve($args[0]->value);
+        $resolved = $this->argumentResolver->resolveAll($args[0]->value);
+
+        return $resolved === [] ? [LiteralArgument::dynamic()] : $resolved;
     }
 }

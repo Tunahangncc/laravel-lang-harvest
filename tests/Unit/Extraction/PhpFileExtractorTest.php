@@ -92,3 +92,19 @@ it('finds multiple calls with correct line numbers', function () {
         ->and($calls[0]->line)->toBe(5)
         ->and($calls[1]->line)->toBe(6);
 });
+
+it('splits a ternary with two static branches into two calls on the same line', function () {
+    $calls = (new PhpFileExtractor)->extract("<?php\n__(\$isEdit ? 'Edit Post' : 'Create New Post');\n");
+
+    expect($calls)->toHaveCount(2)
+        ->and($calls[0]->argument->value)->toBe('Edit Post')
+        ->and($calls[1]->argument->value)->toBe('Create New Post')
+        ->and($calls[0]->line)->toBe($calls[1]->line);
+});
+
+it('treats a ternary with one dynamic branch as a single dynamic call', function () {
+    $calls = (new PhpFileExtractor)->extract("<?php\n__(\$cond ? \$var : 'Static');\n");
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]->argument->isStatic)->toBeFalse();
+});
